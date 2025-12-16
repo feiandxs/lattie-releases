@@ -1,0 +1,126 @@
+name: Public Lattie Desktop Manual Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Source ref (branch, tag, or SHA) from feiandxs/first-quarter'
+        required: false
+        default: 'main'
+      sha:
+        description: 'Source commit SHA from feiandxs/first-quarter (preferred over ref)'
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: public-lattie-desktop-manual-${{ inputs.sha || inputs.ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      source_repo: ${{ steps.meta.outputs.source_repo }}
+      source_ref: ${{ steps.meta.outputs.source_ref }}
+      source_sha: ${{ steps.meta.outputs.source_sha }}
+      run_label: ${{ steps.meta.outputs.run_label }}
+    steps:
+      - name: Prepare metadata
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          SOURCE_REPO="feiandxs/first-quarter"
+          SOURCE_REF="${{ inputs.ref || 'main' }}"
+          SOURCE_SHA="${{ inputs.sha || '' }}"
+          SHORT_SHA="${SOURCE_SHA:0:7}"
+
+          if [[ -z "$SOURCE_SHA" ]]; then
+            RUN_LABEL="$SOURCE_REPO@$SOURCE_REF"
+          else
+            RUN_LABEL="$SOURCE_REPO@$SHORT_SHA"
+          fi
+
+          {
+            echo "source_repo=$SOURCE_REPO"
+            echo "source_ref=$SOURCE_REF"
+            echo "source_sha=$SOURCE_SHA"
+            echo "run_label=$RUN_LABEL"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "Run label: $RUN_LABEL"
+
+  build:
+    name: Build (${{ matrix.name }})
+    needs: prepare
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macos-arm
+            runner: macos-26
+            build_cmd: pnpm --filter lattie-desktop build:mac
+          - name: linux
+            runner: ubuntu-latest
+            build_cmd: pnpm --filter lattie-desktop build:linux
+          - name: windows
+            runner: windows-latest
+            build_cmd: pnpm --filter lattie-desktop build:win
+    steps:
+      - name: Validate PRIVATE_REPO_PAT
+        env:
+          PRIVATE_REPO_PAT: ${{ secrets.PRIVATE_REPO_PAT }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${PRIVATE_REPO_PAT:-}" ]]; then
+            echo "Missing secret: PRIVATE_REPO_PAT"
+            exit 1
+          fi
+
+      - name: Verify token access to source repo
+        env:
+          GH_TOKEN: ${{ secrets.PRIVATE_REPO_PAT }}
+        shell: bash
+        run: gh api "repos/${{ needs.prepare.outputs.source_repo }}" >/dev/null
+
+      - name: Checkout private source
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ needs.prepare.outputs.source_repo }}
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          ref: ${{ needs.prepare.outputs.source_sha || needs.prepare.outputs.source_ref }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.20.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        shell: bash
+        run: pnpm install --frozen-lockfile
+
+      - name: Build lattie-desktop
+        shell: bash
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+        run: ${{ matrix.build_cmd }}
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: lattie-desktop-${{ matrix.name }}
+          if-no-files-found: error
+          path: |
+            apps/lattie-desktop/dist/**
