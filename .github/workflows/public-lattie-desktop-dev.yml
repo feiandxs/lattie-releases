@@ -61,7 +61,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: [macos-13, macos-14]
+        runner: [macos-14, macos-14-large]
     steps:
       - name: Checkout private source
         uses: actions/checkout@v4
