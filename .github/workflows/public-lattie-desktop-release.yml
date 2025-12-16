@@ -277,6 +277,9 @@ jobs:
       SOURCE_REPO: ${{ needs.prepare.outputs.source_repo }}
       SOURCE_SHA: ${{ needs.prepare.outputs.source_sha }}
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Download macOS dist
         uses: actions/download-artifact@v4
         with:
