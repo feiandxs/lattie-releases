@@ -1,0 +1,343 @@
+name: Public Lattie Desktop Release
+
+on:
+  repository_dispatch:
+    types: [public-lattie-desktop-release]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: public-lattie-desktop-release-${{ github.event.client_payload.tag || github.event.client_payload.sha || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      source_repo: ${{ steps.meta.outputs.source_repo }}
+      source_sha: ${{ steps.meta.outputs.source_sha }}
+      tag: ${{ steps.meta.outputs.tag }}
+      semver: ${{ steps.meta.outputs.semver }}
+      is_prerelease: ${{ steps.meta.outputs.is_prerelease }}
+      title: ${{ steps.meta.outputs.title }}
+    steps:
+      - name: Prepare metadata
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          SOURCE_REPO="${{ github.event.client_payload.repo || 'feiandxs/first-quarter' }}"
+          SOURCE_SHA="${{ github.event.client_payload.sha || '' }}"
+          TAG="${{ github.event.client_payload.tag || '' }}"
+
+          if [[ -z "$TAG" ]]; then
+            echo "Missing client_payload.tag" >&2
+            exit 1
+          fi
+
+          if [[ ! "$TAG" =~ ^v[0-9]+\\.[0-9]+\\.[0-9]+([\\-\\+].+)?$ ]]; then
+            echo "Invalid tag format: $TAG (expected vX.Y.Z or vX.Y.Z-...)" >&2
+            exit 1
+          fi
+
+          SEMVER="${TAG#v}"
+          IS_PRERELEASE="false"
+          if [[ "$SEMVER" == *-* ]]; then
+            IS_PRERELEASE="true"
+          fi
+
+          TITLE="Lattie Desktop $TAG"
+
+          {
+            echo "source_repo=$SOURCE_REPO"
+            echo "source_sha=$SOURCE_SHA"
+            echo "tag=$TAG"
+            echo "semver=$SEMVER"
+            echo "is_prerelease=$IS_PRERELEASE"
+            echo "title=$TITLE"
+          } >> "$GITHUB_OUTPUT"
+
+  build-macos:
+    name: macOS (arm)
+    needs: prepare
+    runs-on: macos-26
+    steps:
+      - name: Validate PRIVATE_REPO_PAT
+        env:
+          PRIVATE_REPO_PAT: ${{ secrets.PRIVATE_REPO_PAT }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${PRIVATE_REPO_PAT:-}" ]]; then
+            echo "Missing secret: PRIVATE_REPO_PAT"
+            exit 1
+          fi
+
+      - name: Verify token access to source repo
+        env:
+          GH_TOKEN: ${{ secrets.PRIVATE_REPO_PAT }}
+        shell: bash
+        run: gh api "repos/${{ needs.prepare.outputs.source_repo }}" >/dev/null
+
+      - name: Checkout private source
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ needs.prepare.outputs.source_repo }}
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          ref: ${{ needs.prepare.outputs.source_sha || needs.prepare.outputs.tag }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.20.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Override app version
+        shell: bash
+        env:
+          OVERRIDE_VERSION: ${{ needs.prepare.outputs.semver }}
+        run: |
+          set -euo pipefail
+          node -e "const fs=require('fs'); const p='apps/lattie-desktop/package.json'; const j=JSON.parse(fs.readFileSync(p,'utf8')); j.version=process.env.OVERRIDE_VERSION; fs.writeFileSync(p, JSON.stringify(j,null,2)+'\\n'); console.log('Set version to', j.version);"
+
+      - name: Install dependencies
+        shell: bash
+        run: pnpm install --frozen-lockfile
+
+      - name: Build (mac)
+        shell: bash
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+        run: pnpm --filter lattie-desktop build:mac
+
+      - name: Upload dist artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-macos
+          if-no-files-found: error
+          path: apps/lattie-desktop/dist/**
+
+  build-linux:
+    name: Linux (x64)
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate PRIVATE_REPO_PAT
+        env:
+          PRIVATE_REPO_PAT: ${{ secrets.PRIVATE_REPO_PAT }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${PRIVATE_REPO_PAT:-}" ]]; then
+            echo "Missing secret: PRIVATE_REPO_PAT"
+            exit 1
+          fi
+
+      - name: Verify token access to source repo
+        env:
+          GH_TOKEN: ${{ secrets.PRIVATE_REPO_PAT }}
+        shell: bash
+        run: gh api "repos/${{ needs.prepare.outputs.source_repo }}" >/dev/null
+
+      - name: Checkout private source
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ needs.prepare.outputs.source_repo }}
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          ref: ${{ needs.prepare.outputs.source_sha || needs.prepare.outputs.tag }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.20.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Override app version
+        shell: bash
+        env:
+          OVERRIDE_VERSION: ${{ needs.prepare.outputs.semver }}
+        run: |
+          set -euo pipefail
+          node -e "const fs=require('fs'); const p='apps/lattie-desktop/package.json'; const j=JSON.parse(fs.readFileSync(p,'utf8')); j.version=process.env.OVERRIDE_VERSION; fs.writeFileSync(p, JSON.stringify(j,null,2)+'\\n'); console.log('Set version to', j.version);"
+
+      - name: Install dependencies
+        shell: bash
+        run: pnpm install --frozen-lockfile
+
+      - name: Build (linux)
+        shell: bash
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+        run: pnpm --filter lattie-desktop build:linux
+
+      - name: Upload dist artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-linux
+          if-no-files-found: error
+          path: apps/lattie-desktop/dist/**
+
+  build-windows:
+    name: Windows (x64)
+    needs: prepare
+    runs-on: windows-latest
+    steps:
+      - name: Validate PRIVATE_REPO_PAT
+        env:
+          PRIVATE_REPO_PAT: ${{ secrets.PRIVATE_REPO_PAT }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${PRIVATE_REPO_PAT:-}" ]]; then
+            echo "Missing secret: PRIVATE_REPO_PAT"
+            exit 1
+          fi
+
+      - name: Verify token access to source repo
+        env:
+          GH_TOKEN: ${{ secrets.PRIVATE_REPO_PAT }}
+        shell: bash
+        run: gh api "repos/${{ needs.prepare.outputs.source_repo }}" >/dev/null
+
+      - name: Checkout private source
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ needs.prepare.outputs.source_repo }}
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          ref: ${{ needs.prepare.outputs.source_sha || needs.prepare.outputs.tag }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.20.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Override app version
+        shell: bash
+        env:
+          OVERRIDE_VERSION: ${{ needs.prepare.outputs.semver }}
+        run: |
+          set -euo pipefail
+          node -e "const fs=require('fs'); const p='apps/lattie-desktop/package.json'; const j=JSON.parse(fs.readFileSync(p,'utf8')); j.version=process.env.OVERRIDE_VERSION; fs.writeFileSync(p, JSON.stringify(j,null,2)+'\\n'); console.log('Set version to', j.version);"
+
+      - name: Install dependencies
+        shell: bash
+        run: pnpm install --frozen-lockfile
+
+      - name: Build (win)
+        shell: bash
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+        run: pnpm --filter lattie-desktop build:win
+
+      - name: Upload dist artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-windows
+          if-no-files-found: error
+          path: apps/lattie-desktop/dist/**
+
+  publish:
+    needs:
+      - prepare
+      - build-macos
+      - build-linux
+      - build-windows
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ needs.prepare.outputs.tag }}
+      TITLE: ${{ needs.prepare.outputs.title }}
+      SEMVER: ${{ needs.prepare.outputs.semver }}
+      IS_PRERELEASE: ${{ needs.prepare.outputs.is_prerelease }}
+      SOURCE_REPO: ${{ needs.prepare.outputs.source_repo }}
+      SOURCE_SHA: ${{ needs.prepare.outputs.source_sha }}
+    steps:
+      - name: Download macOS dist
+        uses: actions/download-artifact@v4
+        with:
+          name: dist-macos
+          path: artifacts/macos
+
+      - name: Download Linux dist
+        uses: actions/download-artifact@v4
+        with:
+          name: dist-linux
+          path: artifacts/linux
+
+      - name: Download Windows dist
+        uses: actions/download-artifact@v4
+        with:
+          name: dist-windows
+          path: artifacts/windows
+
+      - name: Create release (overwrite)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          NOTES="$(cat <<EOF
+          Source: $SOURCE_REPO
+          Commit: $SOURCE_SHA
+          Version: $SEMVER
+          EOF
+          )"
+
+          gh release delete "$TAG" -y || true
+
+          prerelease_flag=""
+          if [[ "$IS_PRERELEASE" == "true" ]]; then
+            prerelease_flag="--prerelease"
+          fi
+
+          gh release create "$TAG" \
+            --title "$TITLE" \
+            --notes "$NOTES" \
+            --target main \
+            $prerelease_flag
+
+      - name: Upload release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mapfile -t files < <(find artifacts -type f \( \
+            -name '*.dmg' -o -name '*.zip' -o -name '*.exe' -o -name '*.msi' -o -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' -o -name '*.blockmap' -o -name '*.yml' -o -name '*.yaml' \
+          \) -print | sort)
+
+          if [[ ${#files[@]} -eq 0 ]]; then
+            echo "No release assets found under artifacts/ (dist output may be unexpected)" >&2
+            exit 1
+          fi
+
+          printf '%s\n' "${files[@]}"
+          gh release upload "$TAG" --clobber "${files[@]}"
+
