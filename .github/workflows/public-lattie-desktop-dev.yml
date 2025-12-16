@@ -157,3 +157,55 @@ jobs:
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
         run: pnpm --filter lattie-desktop build:linux
+
+  build-windows:
+    name: Windows
+    needs: prepare
+    runs-on: windows-latest
+    steps:
+      - name: Validate PRIVATE_REPO_PAT
+        env:
+          PRIVATE_REPO_PAT: ${{ secrets.PRIVATE_REPO_PAT }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${PRIVATE_REPO_PAT:-}" ]]; then
+            echo "Missing secret: PRIVATE_REPO_PAT"
+            exit 1
+          fi
+
+      - name: Verify token access to source repo
+        env:
+          GH_TOKEN: ${{ secrets.PRIVATE_REPO_PAT }}
+        shell: bash
+        run: gh api "repos/${{ needs.prepare.outputs.source_repo }}" >/dev/null
+
+      - name: Checkout private source
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ needs.prepare.outputs.source_repo }}
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          ref: ${{ needs.prepare.outputs.source_sha || needs.prepare.outputs.source_ref }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.20.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        shell: bash
+        run: pnpm install --frozen-lockfile
+
+      - name: Build lattie-desktop (win)
+        shell: bash
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+        run: pnpm --filter lattie-desktop build:win
