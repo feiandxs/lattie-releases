@@ -332,9 +332,20 @@ jobs:
         run: |
           set -euo pipefail
 
-          mapfile -t files < <(find artifacts -type f \( \
-            -name '*.dmg' -o -name '*.zip' -o -name '*.exe' -o -name '*.msi' -o -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' -o -name '*.blockmap' -o -name '*.yml' -o -name '*.yaml' \
-          \) -print | sort)
+          mapfile -t files < <(
+            find artifacts -type f \( \
+              -name '*.dmg' -o \
+              -name '*.zip' -o \
+              -name '*.exe' -o \
+              -name '*.msi' -o \
+              -name '*.AppImage' -o \
+              -name '*.blockmap' -o \
+              -name 'latest*.yml' -o \
+              -name 'latest*.yaml' \
+            \) \
+              ! -path '*/win-unpacked/*' \
+              -print | sort
+          )
 
           if [[ ${#files[@]} -eq 0 ]]; then
             echo "No release assets found under artifacts/ (dist output may be unexpected)" >&2
