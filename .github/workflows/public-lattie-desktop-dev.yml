@@ -1,0 +1,92 @@
+name: Public Lattie Desktop Dev Build
+
+on:
+  repository_dispatch:
+    types: [public-lattie-desktop-dev]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Source ref (branch, tag, or SHA) from feiandxs/first-quarter'
+        required: false
+        default: 'develop'
+      sha:
+        description: 'Source commit SHA from feiandxs/first-quarter (preferred over ref)'
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: public-lattie-desktop-dev-${{ github.event.client_payload.sha || inputs.sha || github.event.client_payload.ref || inputs.ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      source_repo: ${{ steps.meta.outputs.source_repo }}
+      source_ref: ${{ steps.meta.outputs.source_ref }}
+      source_sha: ${{ steps.meta.outputs.source_sha }}
+      run_label: ${{ steps.meta.outputs.run_label }}
+    steps:
+      - name: Prepare metadata
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          SOURCE_REPO="${{ github.event.client_payload.repo || 'feiandxs/first-quarter' }}"
+          SOURCE_REF="${{ github.event.client_payload.ref || inputs.ref || 'develop' }}"
+          SOURCE_SHA="${{ github.event.client_payload.sha || inputs.sha || '' }}"
+          SHORT_SHA="${SOURCE_SHA:0:7}"
+
+          if [[ -z "$SOURCE_SHA" ]]; then
+            RUN_LABEL="$SOURCE_REPO@$SOURCE_REF"
+          else
+            RUN_LABEL="$SOURCE_REPO@$SHORT_SHA"
+          fi
+
+          {
+            echo "source_repo=$SOURCE_REPO"
+            echo "source_ref=$SOURCE_REF"
+            echo "source_sha=$SOURCE_SHA"
+            echo "run_label=$RUN_LABEL"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "Run label: $RUN_LABEL"
+
+  build-macos:
+    name: macOS (${{ matrix.runner }})
+    needs: prepare
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-13, macos-14]
+    steps:
+      - name: Checkout private source
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ needs.prepare.outputs.source_repo }}
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          ref: ${{ needs.prepare.outputs.source_sha || needs.prepare.outputs.source_ref }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.20.0
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build lattie-desktop (mac)
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+        run: pnpm --filter lattie-desktop build:mac
