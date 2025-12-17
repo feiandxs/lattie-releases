@@ -3,6 +3,27 @@ name: Public Lattie Desktop Release
 on:
   repository_dispatch:
     types: [public-lattie-desktop-release]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag name to build and publish (e.g. v1.2.3)
+        required: true
+        type: string
+      include_metadata:
+        description: Include electron-builder metadata/blockmap
+        required: false
+        type: boolean
+        default: true
+      draft:
+        description: Create release as draft
+        required: false
+        type: boolean
+        default: false
+      prerelease:
+        description: Mark release as prerelease
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -12,345 +33,259 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  prepare:
+  meta:
     runs-on: ubuntu-latest
     outputs:
-      source_repo: ${{ steps.meta.outputs.source_repo }}
-      source_sha: ${{ steps.meta.outputs.source_sha }}
-      tag: ${{ steps.meta.outputs.tag }}
+      checkout_ref: ${{ steps.meta.outputs.checkout_ref }}
+      tag_name: ${{ steps.meta.outputs.tag_name }}
       semver: ${{ steps.meta.outputs.semver }}
-      is_prerelease: ${{ steps.meta.outputs.is_prerelease }}
-      title: ${{ steps.meta.outputs.title }}
+      short_sha: ${{ steps.meta.outputs.short_sha }}
+      include_metadata: ${{ steps.meta.outputs.include_metadata }}
+      draft: ${{ steps.meta.outputs.draft }}
+      prerelease: ${{ steps.meta.outputs.prerelease }}
+      source_repo: ${{ steps.meta.outputs.source_repo }}
+      source_ref: ${{ steps.meta.outputs.source_ref }}
+      source_sha: ${{ steps.meta.outputs.source_sha }}
     steps:
-      - name: Prepare metadata
+      - name: Resolve release metadata
         id: meta
-        shell: bash
+        env:
+          EVENT_REPO: ${{ github.event.client_payload.repo }}
+          EVENT_REF: ${{ github.event.client_payload.ref }}
+          EVENT_SHA: ${{ github.event.client_payload.sha }}
+          EVENT_TAG: ${{ github.event.client_payload.tag }}
+          INPUT_TAG: ${{ inputs.tag }}
+          INPUT_INCLUDE_METADATA: ${{ inputs.include_metadata }}
+          INPUT_DRAFT: ${{ inputs.draft }}
+          INPUT_PRERELEASE: ${{ inputs.prerelease }}
         run: |
           set -euo pipefail
 
-          SOURCE_REPO="${{ github.event.client_payload.repo || 'feiandxs/first-quarter' }}"
-          SOURCE_SHA="${{ github.event.client_payload.sha || '' }}"
-          TAG="${{ github.event.client_payload.tag || '' }}"
-
-          if [[ -z "$TAG" ]]; then
-            echo "Missing client_payload.tag" >&2
+          ref="${EVENT_REF:-}"
+          if [ -z "$ref" ]; then
+            if [ -n "${INPUT_TAG:-}" ]; then
+              ref="refs/tags/${INPUT_TAG}"
+            fi
+          fi
+          if [ -z "$ref" ]; then
+            echo "Missing ref; only tag-based releases are supported" >&2
+            exit 1
+          fi
+          if [[ "$ref" != refs/tags/* ]]; then
+            echo "Release builds must use a tag ref (got: $ref)" >&2
             exit 1
           fi
 
-          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-+].+)?$ ]]; then
-            echo "Invalid tag format: $TAG (expected vX.Y.Z or vX.Y.Z-...)" >&2
+          tag="${EVENT_TAG:-${ref#refs/tags/}}"
+          if [ -z "$tag" ]; then
+            echo "Unable to resolve tag name from ref: $ref" >&2
             exit 1
           fi
 
-          SEMVER="${TAG#v}"
-          IS_PRERELEASE="false"
-          if [[ "$SEMVER" == *-* ]]; then
-            IS_PRERELEASE="true"
+          semver="$tag"
+          if [[ "$semver" == v* ]]; then
+            semver="${semver#v}"
           fi
 
-          TITLE="Lattie Desktop $TAG"
-
-          {
-            echo "source_repo=$SOURCE_REPO"
-            echo "source_sha=$SOURCE_SHA"
-            echo "tag=$TAG"
-            echo "semver=$SEMVER"
-            echo "is_prerelease=$IS_PRERELEASE"
-            echo "title=$TITLE"
-          } >> "$GITHUB_OUTPUT"
-
-  build-macos:
-    name: macOS (arm)
-    needs: prepare
-    runs-on: macos-26
-    steps:
-      - name: Validate PRIVATE_REPO_PAT
-        env:
-          PRIVATE_REPO_PAT: ${{ secrets.PRIVATE_REPO_PAT }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [[ -z "${PRIVATE_REPO_PAT:-}" ]]; then
-            echo "Missing secret: PRIVATE_REPO_PAT"
-            exit 1
+          sha="${EVENT_SHA:-}"
+          if [ -z "$sha" ]; then
+            sha="${GITHUB_SHA}"
           fi
+          short="${sha:0:7}"
 
-      - name: Verify token access to source repo
-        env:
-          GH_TOKEN: ${{ secrets.PRIVATE_REPO_PAT }}
-        shell: bash
-        run: gh api "repos/${{ needs.prepare.outputs.source_repo }}" >/dev/null
+          include_metadata="${INPUT_INCLUDE_METADATA:-true}"
+          draft="${INPUT_DRAFT:-false}"
+          prerelease="${INPUT_PRERELEASE:-false}"
 
-      - name: Checkout private source
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ needs.prepare.outputs.source_repo }}
-          token: ${{ secrets.PRIVATE_REPO_PAT }}
-          ref: ${{ needs.prepare.outputs.source_sha || needs.prepare.outputs.tag }}
-          fetch-depth: 1
-          persist-credentials: false
+          source_repo="${EVENT_REPO:-feiandxs/first-quarter}"
+          source_ref="$ref"
+          source_sha="${EVENT_SHA:-}"
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10.20.0
+          echo "checkout_ref=$ref" >> "$GITHUB_OUTPUT"
+          echo "tag_name=$tag" >> "$GITHUB_OUTPUT"
+          echo "semver=$semver" >> "$GITHUB_OUTPUT"
+          echo "short_sha=$short" >> "$GITHUB_OUTPUT"
+          echo "include_metadata=$include_metadata" >> "$GITHUB_OUTPUT"
+          echo "draft=$draft" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+          echo "source_repo=$source_repo" >> "$GITHUB_OUTPUT"
+          echo "source_ref=$source_ref" >> "$GITHUB_OUTPUT"
+          echo "source_sha=$source_sha" >> "$GITHUB_OUTPUT"
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: pnpm
+  macos:
+    needs: meta
+    uses: ./.github/workflows/public-shared-macos.yml
+    with:
+      runner: macos-26
+      checkout_ref: ${{ needs.meta.outputs.checkout_ref }}
+      short_sha: ${{ needs.meta.outputs.short_sha }}
+      include_metadata: ${{ needs.meta.outputs.include_metadata }}
+      override_version: ${{ needs.meta.outputs.semver }}
+      artifact_name: macos-dist
+      artifact_filename_suffix: ''
+    secrets: inherit
 
-      - name: Override app version
-        shell: bash
-        env:
-          OVERRIDE_VERSION: ${{ needs.prepare.outputs.semver }}
-        run: |
-          set -euo pipefail
-          node -e "const fs=require('fs'); const p='apps/lattie-desktop/package.json'; const j=JSON.parse(fs.readFileSync(p,'utf8')); j.version=process.env.OVERRIDE_VERSION; fs.writeFileSync(p, JSON.stringify(j,null,2)+'\\n'); console.log('Set version to', j.version);"
+  linux:
+    needs: meta
+    uses: ./.github/workflows/public-shared-linux.yml
+    with:
+      runner: ubuntu-latest
+      checkout_ref: ${{ needs.meta.outputs.checkout_ref }}
+      short_sha: ${{ needs.meta.outputs.short_sha }}
+      include_metadata: ${{ needs.meta.outputs.include_metadata }}
+      override_version: ${{ needs.meta.outputs.semver }}
+      artifact_name: linux-dist
+      artifact_filename_suffix: ''
+    secrets: inherit
 
-      - name: Install dependencies
-        shell: bash
-        run: pnpm install --frozen-lockfile
-
-      - name: Build (mac)
-        shell: bash
-        env:
-          CSC_IDENTITY_AUTO_DISCOVERY: false
-        run: pnpm --filter lattie-desktop build:mac
-
-      - name: Upload dist artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: dist-macos
-          if-no-files-found: error
-          path: apps/lattie-desktop/dist/**
-
-  build-linux:
-    name: Linux (x64)
-    needs: prepare
-    runs-on: ubuntu-latest
-    steps:
-      - name: Validate PRIVATE_REPO_PAT
-        env:
-          PRIVATE_REPO_PAT: ${{ secrets.PRIVATE_REPO_PAT }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [[ -z "${PRIVATE_REPO_PAT:-}" ]]; then
-            echo "Missing secret: PRIVATE_REPO_PAT"
-            exit 1
-          fi
-
-      - name: Verify token access to source repo
-        env:
-          GH_TOKEN: ${{ secrets.PRIVATE_REPO_PAT }}
-        shell: bash
-        run: gh api "repos/${{ needs.prepare.outputs.source_repo }}" >/dev/null
-
-      - name: Checkout private source
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ needs.prepare.outputs.source_repo }}
-          token: ${{ secrets.PRIVATE_REPO_PAT }}
-          ref: ${{ needs.prepare.outputs.source_sha || needs.prepare.outputs.tag }}
-          fetch-depth: 1
-          persist-credentials: false
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10.20.0
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: pnpm
-
-      - name: Override app version
-        shell: bash
-        env:
-          OVERRIDE_VERSION: ${{ needs.prepare.outputs.semver }}
-        run: |
-          set -euo pipefail
-          node -e "const fs=require('fs'); const p='apps/lattie-desktop/package.json'; const j=JSON.parse(fs.readFileSync(p,'utf8')); j.version=process.env.OVERRIDE_VERSION; fs.writeFileSync(p, JSON.stringify(j,null,2)+'\\n'); console.log('Set version to', j.version);"
-
-      - name: Install dependencies
-        shell: bash
-        run: pnpm install --frozen-lockfile
-
-      - name: Build (linux)
-        shell: bash
-        env:
-          CSC_IDENTITY_AUTO_DISCOVERY: false
-        run: pnpm --filter lattie-desktop build:linux
-
-      - name: Upload dist artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: dist-linux
-          if-no-files-found: error
-          path: apps/lattie-desktop/dist/**
-
-  build-windows:
-    name: Windows (x64)
-    needs: prepare
-    runs-on: windows-latest
-    steps:
-      - name: Validate PRIVATE_REPO_PAT
-        env:
-          PRIVATE_REPO_PAT: ${{ secrets.PRIVATE_REPO_PAT }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [[ -z "${PRIVATE_REPO_PAT:-}" ]]; then
-            echo "Missing secret: PRIVATE_REPO_PAT"
-            exit 1
-          fi
-
-      - name: Verify token access to source repo
-        env:
-          GH_TOKEN: ${{ secrets.PRIVATE_REPO_PAT }}
-        shell: bash
-        run: gh api "repos/${{ needs.prepare.outputs.source_repo }}" >/dev/null
-
-      - name: Checkout private source
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ needs.prepare.outputs.source_repo }}
-          token: ${{ secrets.PRIVATE_REPO_PAT }}
-          ref: ${{ needs.prepare.outputs.source_sha || needs.prepare.outputs.tag }}
-          fetch-depth: 1
-          persist-credentials: false
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10.20.0
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: pnpm
-
-      - name: Override app version
-        shell: bash
-        env:
-          OVERRIDE_VERSION: ${{ needs.prepare.outputs.semver }}
-        run: |
-          set -euo pipefail
-          node -e "const fs=require('fs'); const p='apps/lattie-desktop/package.json'; const j=JSON.parse(fs.readFileSync(p,'utf8')); j.version=process.env.OVERRIDE_VERSION; fs.writeFileSync(p, JSON.stringify(j,null,2)+'\\n'); console.log('Set version to', j.version);"
-
-      - name: Install dependencies
-        shell: bash
-        run: pnpm install --frozen-lockfile
-
-      - name: Build (win)
-        shell: bash
-        env:
-          CSC_IDENTITY_AUTO_DISCOVERY: false
-        run: pnpm --filter lattie-desktop build:win
-
-      - name: Upload dist artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: dist-windows
-          if-no-files-found: error
-          path: apps/lattie-desktop/dist/**
+  windows:
+    needs: meta
+    uses: ./.github/workflows/public-shared-windows.yml
+    with:
+      runner: windows-latest
+      checkout_ref: ${{ needs.meta.outputs.checkout_ref }}
+      short_sha: ${{ needs.meta.outputs.short_sha }}
+      include_metadata: ${{ needs.meta.outputs.include_metadata }}
+      override_version: ${{ needs.meta.outputs.semver }}
+      artifact_name: windows-dist
+      artifact_filename_suffix: ''
+    secrets: inherit
 
   publish:
     needs:
-      - prepare
-      - build-macos
-      - build-linux
-      - build-windows
+      - meta
+      - macos
+      - linux
+      - windows
     runs-on: ubuntu-latest
     permissions:
       contents: write
     env:
-      TAG: ${{ needs.prepare.outputs.tag }}
-      TITLE: ${{ needs.prepare.outputs.title }}
-      SEMVER: ${{ needs.prepare.outputs.semver }}
-      IS_PRERELEASE: ${{ needs.prepare.outputs.is_prerelease }}
-      SOURCE_REPO: ${{ needs.prepare.outputs.source_repo }}
-      SOURCE_SHA: ${{ needs.prepare.outputs.source_sha }}
+      TAG_NAME: ${{ needs.meta.outputs.tag_name }}
+      SOURCE_REPO: ${{ needs.meta.outputs.source_repo }}
+      SOURCE_REF: ${{ needs.meta.outputs.source_ref }}
+      SOURCE_SHA: ${{ needs.meta.outputs.source_sha }}
+      RELEASE_DRAFT: ${{ needs.meta.outputs.draft }}
+      RELEASE_PRERELEASE: ${{ needs.meta.outputs.prerelease }}
+      GH_TOKEN: ${{ github.token }}
     steps:
-      - name: Checkout repository
+      - name: Checkout repo (required for gh release)
         uses: actions/checkout@v4
 
-      - name: Download macOS dist
+      - name: Download macOS artifact
         uses: actions/download-artifact@v4
         with:
-          name: dist-macos
+          name: macos-dist
           path: artifacts/macos
 
-      - name: Download Linux dist
+      - name: Download Linux artifact
         uses: actions/download-artifact@v4
         with:
-          name: dist-linux
+          name: linux-dist
           path: artifacts/linux
 
-      - name: Download Windows dist
+      - name: Download Windows artifact
         uses: actions/download-artifact@v4
         with:
-          name: dist-windows
+          name: windows-dist
           path: artifacts/windows
 
-      - name: Create release (overwrite)
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
+      - name: Prepare release assets
+        id: assets
         run: |
           set -euo pipefail
 
-          NOTES="$(cat <<EOF
-          Source: $SOURCE_REPO
-          Commit: $SOURCE_SHA
-          Version: $SEMVER
-          EOF
-          )"
+          notes_path="release-notes.md"
+          {
+            echo "Source: ${SOURCE_REPO}"
+            echo "Ref: ${SOURCE_REF}"
+            if [ -n "${SOURCE_SHA:-}" ]; then
+              echo "SHA: ${SOURCE_SHA}"
+              echo "Commit: https://github.com/${SOURCE_REPO}/commit/${SOURCE_SHA}"
+            fi
+            echo
+            echo "Build: https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          } > "$notes_path"
 
-          gh release delete "$TAG" -y || true
+          assets_file="release-assets.txt"
+          release_dir="release-assets"
+          mkdir -p "$release_dir"
+          : > "$assets_file"
 
-          prerelease_flag=""
-          if [[ "$IS_PRERELEASE" == "true" ]]; then
-            prerelease_flag="--prerelease"
+          find artifacts -type f \( \
+            -name '*.zip' -o \
+            -name '*.dmg' -o \
+            -name '*.yml' -o \
+            -name '*.yaml' -o \
+            -name '*.blockmap' -o \
+            -name '*.exe' -o \
+            -name '*.msi' -o \
+            -name '*.AppImage' \
+          \) -print | sort | while IFS= read -r asset; do
+            platform="$(echo "$asset" | cut -d/ -f2)"
+            if [ -z "$platform" ]; then
+              platform="artifact"
+            fi
+            base="$(basename "$asset")"
+            dest="${release_dir}/${platform}-${base}"
+            counter=1
+            while [ -e "$dest" ]; do
+              counter=$((counter + 1))
+              dest="${release_dir}/${platform}-${counter}-${base}"
+            done
+            cp "$asset" "$dest"
+            echo "$dest" >> "$assets_file"
+          done
+          if [ ! -s "$assets_file" ]; then
+            echo 'No eligible release assets were found' >&2
+            exit 1
           fi
+          echo "assets_file=$assets_file" >> "$GITHUB_OUTPUT"
+          echo "notes_path=$notes_path" >> "$GITHUB_OUTPUT"
 
-          gh release create "$TAG" \
-            --title "$TITLE" \
-            --notes "$NOTES" \
-            --target main \
-            $prerelease_flag
-
-      - name: Upload release assets
+      - name: Publish GitHub Release
         env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
+          ASSETS_FILE: ${{ steps.assets.outputs.assets_file }}
+          NOTES_PATH: ${{ steps.assets.outputs.notes_path }}
         run: |
           set -euo pipefail
-
-          mapfile -t files < <(
-            find artifacts -type f \( \
-              -name '*.dmg' -o \
-              -name '*.zip' -o \
-              -name '*.exe' -o \
-              -name '*.msi' -o \
-              -name '*.AppImage' -o \
-              -name '*.blockmap' -o \
-              -name 'latest*.yml' -o \
-              -name 'latest*.yaml' \
-            \) \
-              ! -path '*/win-unpacked/*' \
-              -print | sort
-          )
-
-          if [[ ${#files[@]} -eq 0 ]]; then
-            echo "No release assets found under artifacts/ (dist output may be unexpected)" >&2
+          if [ -z "${TAG_NAME:-}" ]; then
+            echo 'Tag name is required to publish a release' >&2
+            exit 1
+          fi
+          if [ -z "${NOTES_PATH:-}" ] || [ ! -f "${NOTES_PATH}" ]; then
+            echo "Release notes file not found at ${NOTES_PATH}" >&2
+            exit 1
+          fi
+          if [ -z "${ASSETS_FILE:-}" ] || [ ! -f "${ASSETS_FILE}" ]; then
+            echo "Asset list file not found at ${ASSETS_FILE}" >&2
             exit 1
           fi
 
-          printf '%s\n' "${files[@]}"
-          gh release upload "$TAG" --clobber "${files[@]}"
+          assets=()
+          while IFS= read -r asset; do
+            assets+=("$asset")
+          done < "${ASSETS_FILE}"
+          if [ ${#assets[@]} -eq 0 ]; then
+            echo 'Asset list is empty' >&2
+            exit 1
+          fi
+
+          flags=()
+          if [ "${RELEASE_DRAFT}" = "true" ]; then
+            flags+=(--draft)
+          fi
+          if [ "${RELEASE_PRERELEASE}" = "true" ]; then
+            flags+=(--prerelease)
+          fi
+
+          if gh release view "${TAG_NAME}" >/dev/null 2>&1; then
+            gh release delete "${TAG_NAME}" -y
+          fi
+
+          gh release create "${TAG_NAME}" "${assets[@]}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --target main \
+            --title "Lattie Desktop ${TAG_NAME}" \
+            --notes-file "${NOTES_PATH}" \
+            "${flags[@]}"

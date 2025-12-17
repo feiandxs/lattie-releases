@@ -1,0 +1,155 @@
+name: Public Shared macOS Build
+
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: Runner label for macOS build
+        required: true
+        type: string
+      checkout_ref:
+        description: Ref to check out (from prepare)
+        required: true
+        type: string
+      short_sha:
+        description: Short SHA for artifact naming
+        required: true
+        type: string
+      app_dir:
+        description: Path to the Electron app
+        required: false
+        type: string
+      node_version:
+        description: Node.js version to install
+        required: false
+        type: string
+      pnpm_version:
+        description: pnpm version to install
+        required: false
+        type: string
+      artifact_name:
+        description: Name used when uploading build artifacts
+        required: false
+        type: string
+      artifact_filename_suffix:
+        description: Optional suffix appended before extension when copying artifacts
+        required: false
+        type: string
+      include_metadata:
+        description: Include electron-builder metadata files
+        required: false
+        type: string
+      override_version:
+        description: Semver to force into package metadata before building
+        required: false
+        type: string
+    secrets:
+      PRIVATE_REPO_PAT:
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ${{ inputs.runner }}
+    env:
+      APP_DIR: ${{ inputs.app_dir || 'apps/lattie-desktop' }}
+      PNPM_VERSION: ${{ inputs.pnpm_version || '10.20.0' }}
+      NODE_VERSION: ${{ inputs.node_version || '20' }}
+      ARTIFACT_NAME: ${{ inputs.artifact_name || 'macos-dist' }}
+      ARTIFACT_FILENAME_SUFFIX: ${{ inputs.artifact_filename_suffix }}
+      INCLUDE_METADATA: ${{ inputs.include_metadata || 'true' }}
+      OVERRIDE_VERSION: ${{ inputs.override_version }}
+    steps:
+      - name: Checkout private repo
+        uses: actions/checkout@v4
+        with:
+          repository: feiandxs/first-quarter
+          ref: ${{ inputs.checkout_ref }}
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Override package version
+        if: env.OVERRIDE_VERSION != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs = require('fs');
+          const path = require('path');
+          const version = process.env.OVERRIDE_VERSION;
+          const appDir = process.env.APP_DIR || 'apps/lattie-desktop';
+          if (!version) process.exit(0);
+          const pkgPath = path.join(process.cwd(), appDir, 'package.json');
+          const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+          pkg.version = version;
+          fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n');
+          NODE
+
+      - name: Install dependencies
+        shell: bash
+        run: pnpm install --frozen-lockfile
+
+      - name: Build desktop (macOS)
+        shell: bash
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+        run: pnpm --filter lattie-desktop build:mac
+
+      - name: Package artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          APP_DIST="${APP_DIR}/dist"
+          if [ ! -d "$APP_DIST" ]; then
+            echo "Dist directory not found at $APP_DIST" >&2
+            exit 1
+          fi
+          mapfile -t files < <(
+            find "$APP_DIST" -maxdepth 1 -type f \( \
+              -name '*.dmg' -o \
+              -name '*.zip' -o \
+              -name '*.pkg' -o \
+              -name '*.blockmap' -o \
+              -name 'latest*.yml' -o \
+              -name 'latest*.yaml' \
+            \) -print | sort
+          )
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No release artifacts found in $APP_DIST" >&2
+            exit 1
+          fi
+          for file in "${files[@]}"; do
+            base="$(basename "$file")"
+            if [ -n "${ARTIFACT_FILENAME_SUFFIX}" ]; then
+              ext="${base##*.}"
+              stem="${base%.*}"
+              base="${stem}-${ARTIFACT_FILENAME_SUFFIX}.${ext}"
+            fi
+            cp "$file" "release/${base}"
+          done
+          if [ "${INCLUDE_METADATA}" != "true" ]; then
+            find release -type f \( -name 'latest*.yml' -o -name 'latest*.yaml' -o -name '*.blockmap' \) -delete
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: release
