@@ -24,6 +24,11 @@ on:
         required: false
         type: boolean
         default: false
+      enable_signing:
+        description: Enable macOS code signing/notarization (requires secrets)
+        required: false
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -43,6 +48,7 @@ jobs:
       include_metadata: ${{ steps.meta.outputs.include_metadata }}
       draft: ${{ steps.meta.outputs.draft }}
       prerelease: ${{ steps.meta.outputs.prerelease }}
+      enable_signing: ${{ steps.meta.outputs.enable_signing }}
       source_repo: ${{ steps.meta.outputs.source_repo }}
       source_ref: ${{ steps.meta.outputs.source_ref }}
       source_sha: ${{ steps.meta.outputs.source_sha }}
@@ -58,6 +64,7 @@ jobs:
           INPUT_INCLUDE_METADATA: ${{ inputs.include_metadata }}
           INPUT_DRAFT: ${{ inputs.draft }}
           INPUT_PRERELEASE: ${{ inputs.prerelease }}
+          INPUT_ENABLE_SIGNING: ${{ inputs.enable_signing }}
         run: |
           set -euo pipefail
 
@@ -96,6 +103,7 @@ jobs:
           include_metadata="${INPUT_INCLUDE_METADATA:-true}"
           draft="${INPUT_DRAFT:-false}"
           prerelease="${INPUT_PRERELEASE:-false}"
+          enable_signing="${INPUT_ENABLE_SIGNING:-true}"
 
           source_repo="${EVENT_REPO:-feiandxs/first-quarter}"
           source_ref="$ref"
@@ -108,6 +116,7 @@ jobs:
           echo "include_metadata=$include_metadata" >> "$GITHUB_OUTPUT"
           echo "draft=$draft" >> "$GITHUB_OUTPUT"
           echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+          echo "enable_signing=$enable_signing" >> "$GITHUB_OUTPUT"
           echo "source_repo=$source_repo" >> "$GITHUB_OUTPUT"
           echo "source_ref=$source_ref" >> "$GITHUB_OUTPUT"
           echo "source_sha=$source_sha" >> "$GITHUB_OUTPUT"
@@ -120,6 +129,7 @@ jobs:
       checkout_ref: ${{ needs.meta.outputs.checkout_ref }}
       short_sha: ${{ needs.meta.outputs.short_sha }}
       include_metadata: ${{ needs.meta.outputs.include_metadata }}
+      enable_signing: ${{ needs.meta.outputs.enable_signing }}
       override_version: ${{ needs.meta.outputs.semver }}
       artifact_name: macos-dist
       artifact_filename_suffix: ''
