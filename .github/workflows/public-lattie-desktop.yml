@@ -420,8 +420,6 @@ jobs:
       SHORT_SHA: ${{ needs.meta.outputs.short_sha }}
       OVERRIDE_VERSION: ${{ needs.meta.outputs.semver }}
       TAG_NAME: ${{ needs.meta.outputs.tag_name }}
-      PNPM_STORE_PATH: C:\pnpm-store
-      PNPM_VIRTUAL_STORE_DIR: ../.pnpm
     steps:
       - name: Checkout private repository
         uses: actions/checkout@v4
@@ -478,7 +476,7 @@ jobs:
         working-directory: ${{ env.WW_WORKSPACE }}
         run: |
           pnpm --version
-          pnpm install --frozen-lockfile --config.store-dir=${{ env.PNPM_STORE_PATH }} --config.virtual-store-dir=${{ env.PNPM_VIRTUAL_STORE_DIR }}
+          pnpm install --frozen-lockfile
 
       - name: Build project
         shell: bash
