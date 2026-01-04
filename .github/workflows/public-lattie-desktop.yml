@@ -246,7 +246,7 @@ jobs:
   # ============================================
   macos-x64:
     needs: meta
-    runs-on: macos-13
+    runs-on: macos-14
     env:
       SHORT_SHA: ${{ needs.meta.outputs.short_sha }}
       OVERRIDE_VERSION: ${{ needs.meta.outputs.semver }}
