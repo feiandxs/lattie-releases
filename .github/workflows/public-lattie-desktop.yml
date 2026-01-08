@@ -27,7 +27,7 @@ env:
   NODE_VERSION: '20'
   PNPM_VERSION: '10.20.0'
   PNPM_STORE_PATH: ~/.pnpm-store
-  APP_DIR: lattie-apps/desktop
+  APP_DIR: apps/lattie-desktop
 
 jobs:
   # ============================================
