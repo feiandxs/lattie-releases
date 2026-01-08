@@ -57,7 +57,8 @@ jobs:
           fi
 
           SHORT_SHA="${SHA:0:7}"
-          SEMVER="${TAG#v}"
+          TAG_VERSION="${TAG##*/}"   # Extract version after last / (e.g., lattie-desktop/v0.1.0 -> v0.1.0)
+          SEMVER="${TAG_VERSION#v}"  # Remove v prefix
 
           DRAFT="${{ inputs.draft || 'false' }}"
           PRERELEASE="${{ inputs.prerelease || 'false' }}"
