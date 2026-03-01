@@ -256,8 +256,9 @@ jobs:
       - name: Build Tauri (Windows x64)
         shell: bash
         run: |
+          # dev 版本含 pre-release 标识符，MSI 格式要求纯数字版本，只打 NSIS
           pnpm --filter lattie-desktop tauri build \
-            --bundles nsis,msi \
+            --bundles nsis \
             --ci
 
       - name: Collect artifacts
@@ -265,11 +266,10 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p release
-          for dir in "${APP_DIR}/src-tauri/target/release/bundle/nsis" "${APP_DIR}/src-tauri/target/release/bundle/msi"; do
-            [ -d "$dir" ] && find "$dir" -maxdepth 1 -type f \( \
-              -name '*.exe' -o -name '*.msi' -o -name '*.nsis.zip' -o -name '*.msi.zip' -o -name '*.sig' \
-            \) -exec cp {} release/ \;
-          done
+          NSIS_DIR="${APP_DIR}/src-tauri/target/release/bundle/nsis"
+          [ -d "$NSIS_DIR" ] && find "$NSIS_DIR" -maxdepth 1 -type f \( \
+            -name '*.exe' -o -name '*.nsis.zip' -o -name '*.sig' \
+          \) -exec cp {} release/ \;
           find release -maxdepth 1 -type f | while read -r f; do
             new="${f// /.}"; [ "$new" != "$f" ] && mv "$f" "$new"
           done
