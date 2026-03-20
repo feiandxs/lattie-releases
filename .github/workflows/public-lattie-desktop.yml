@@ -453,7 +453,7 @@ jobs:
 
           # macOS: 单个 Universal Binary 同时服务 arm64 和 x86_64
           MAC=$(find artifacts/macos-universal -name '*.app.tar.gz' | head -1)
-          WIN=$(find artifacts/windows-x64 -name '*.nsis.zip' -o -name '*.msi.zip' | head -1)
+          WIN=$(find artifacts/windows-x64 -name '*-setup.exe' -o -name '*.nsis.zip' -o -name '*.msi.zip' | head -1)
           LIN=$(find artifacts/linux-x64   -name '*.AppImage.tar.gz' | head -1)
 
           for f in "$MAC" "$WIN" "$LIN"; do
