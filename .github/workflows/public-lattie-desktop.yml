@@ -309,14 +309,16 @@ jobs:
           NSIS_DIR="target/release/bundle/nsis"
           MSI_DIR="target/release/bundle/msi"
           for dir in "$NSIS_DIR" "$MSI_DIR"; do
-            [ -d "$dir" ] && find "$dir" -maxdepth 1 -type f \( \
-              -name '*.exe' -o -name '*.msi' -o -name '*.nsis.zip' -o -name '*.msi.zip' -o -name '*.sig' \
-            \) -exec cp {} release/ \;
+            if [ -d "$dir" ]; then
+              find "$dir" -maxdepth 1 -type f \( \
+                -name '*.exe' -o -name '*.msi' -o -name '*.nsis.zip' -o -name '*.msi.zip' -o -name '*.sig' \
+              \) -exec cp {} release/ \;
+            fi
           done
           # 文件名空格替换为点（避免 gh release 上传问题）
           find release -maxdepth 1 -type f | while read -r f; do
             new="${f// /.}"
-            [ "$new" != "$f" ] && mv "$f" "$new"
+            [ "$new" != "$f" ] && mv "$f" "$new" || true
           done
           ls -la release
 
