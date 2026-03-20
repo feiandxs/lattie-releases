@@ -182,7 +182,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          BUNDLE_DIR="${APP_DIR}/src-tauri/target/universal-apple-darwin/release/bundle/dmg"
+          BUNDLE_DIR="target/universal-apple-darwin/release/bundle/dmg"
           DMG_PATH=$(find "$BUNDLE_DIR" -maxdepth 1 -name '*.dmg' -print -quit || true)
           [ -z "$DMG_PATH" ] && { echo "::error::No .dmg found" >&2; exit 1; }
           echo "Notarizing DMG: $DMG_PATH"
@@ -199,7 +199,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          BUNDLE_DIR="${APP_DIR}/src-tauri/target/universal-apple-darwin/release/bundle/macos"
+          BUNDLE_DIR="target/universal-apple-darwin/release/bundle/macos"
           APP_PATH=$(find "$BUNDLE_DIR" -maxdepth 1 -type d -name '*.app' -print -quit || true)
           if [ -z "$APP_PATH" ]; then
             echo "::error::Unable to locate .app bundle" >&2; exit 1
@@ -213,7 +213,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p release
-          BUNDLE_DIR="${APP_DIR}/src-tauri/target/universal-apple-darwin/release/bundle"
+          BUNDLE_DIR="target/universal-apple-darwin/release/bundle"
           find "$BUNDLE_DIR/macos" "$BUNDLE_DIR/dmg" -maxdepth 1 -type f \( \
             -name '*.dmg' -o -name '*.app.tar.gz' -o -name '*.app.tar.gz.sig' \
           \) -exec cp {} release/ \; 2>/dev/null || true
@@ -306,8 +306,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p release
-          NSIS_DIR="${APP_DIR}/src-tauri/target/release/bundle/nsis"
-          MSI_DIR="${APP_DIR}/src-tauri/target/release/bundle/msi"
+          NSIS_DIR="target/release/bundle/nsis"
+          MSI_DIR="target/release/bundle/msi"
           for dir in "$NSIS_DIR" "$MSI_DIR"; do
             [ -d "$dir" ] && find "$dir" -maxdepth 1 -type f \( \
               -name '*.exe' -o -name '*.msi' -o -name '*.nsis.zip' -o -name '*.msi.zip' -o -name '*.sig' \
@@ -404,7 +404,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p release
-          BUNDLE_DIR="${APP_DIR}/src-tauri/target/release/bundle"
+          BUNDLE_DIR="target/release/bundle"
           find "$BUNDLE_DIR/appimage" "$BUNDLE_DIR/deb" -maxdepth 1 -type f \( \
             -name '*.AppImage' -o -name '*.AppImage.tar.gz' -o -name '*.AppImage.tar.gz.sig' \
             -o -name '*.deb' \
