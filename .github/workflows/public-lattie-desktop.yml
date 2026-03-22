@@ -446,7 +446,7 @@ jobs:
           set -euo pipefail
 
           PUBLISHED_AT="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
-          RELEASE_REPO="feiandxs/lattie-releases"
+          RELEASE_REPO="lattie-studio/lattie-releases"
 
           find_sig() { cat "$1.sig" 2>/dev/null | tr -d '\r\n'; }
           file_url() { echo "https://github.com/${RELEASE_REPO}/releases/download/${TAG_NAME}/$(basename $1)"; }
